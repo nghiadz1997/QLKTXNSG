@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isManagerOrAdmin() {
+      return isSignedIn() && (request.auth.token.role == "manager" || request.auth.token.role == "superAdmin");
+    }
+
+    // Support request attachments
+    match /support-requests/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // Community post images
+    match /community/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // General attachments
+    match /{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isManagerOrAdmin();
+    }
+  }
+}

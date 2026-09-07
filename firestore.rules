@@ -1,0 +1,205 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // CÁC HÀM XÁC THỰC VÀ PHÂN QUYỀN THÔNG MINH
+    // ==========================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Kiểm tra an toàn xem user có phải Quản lý hoặc Super Admin
+    function isManagerOrAdmin() {
+      return isSignedIn() && (
+        // 1. Custom Claims role từ token
+        (request.auth.token.keys().hasAny(['role']) && request.auth.token.role in ['superAdmin', 'truongPhong', 'manager', 'admin'])
+        // 2. Email khớp từ khóa quản trị (không phân biệt hoa thường)
+        || (request.auth.token.email != null && (
+            request.auth.token.email.matches('(?i).*admin.*') ||
+            request.auth.token.email.matches('(?i).*manager.*') ||
+            request.auth.token.email.matches('(?i).*truongphong.*') ||
+            request.auth.token.email.matches('(?i).*caothang.*') ||
+            request.auth.token.email.matches('(?i).*bql.*')
+        ))
+        // 3. Document trong collection users/{uid}
+        || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') in ['superAdmin', 'truongPhong', 'manager', 'admin'])
+      );
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'superAdmin')
+        || (request.auth.token.email != null && (
+            request.auth.token.email.matches('(?i).*admin.*') ||
+            request.auth.token.email.matches('(?i).*caothang.*')
+        ))
+        || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'superAdmin')
+      );
+    }
+
+    function isStudent() {
+      return isSignedIn() && !isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 1. TÀI KHOẢN NGƯỜI DÙNG (USERS)
+    // ==========================================
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (
+        request.auth.uid == uid || isManagerOrAdmin()
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // ==========================================
+    // 2. HỒ SƠ SINH VIÊN (STUDENTS)
+    // ==========================================
+    match /students/{uid} {
+      allow read: if isManagerOrAdmin() || (isSignedIn() && (
+        request.auth.uid == uid ||
+        resource.data.get('authUid', '') == request.auth.uid ||
+        (resource.data.get('email', '') != '' && resource.data.get('email', '') == request.auth.token.email)
+      ));
+      allow create: if isManagerOrAdmin();
+      allow delete: if isSuperAdmin();
+      allow update: if isManagerOrAdmin() || (isSignedIn() && (
+        request.auth.uid == uid ||
+        resource.data.get('authUid', '') == request.auth.uid
+      ));
+    }
+
+    // ==========================================
+    // 3. TÒA NHÀ & PHÒNG Ở (BUILDINGS & ROOMS)
+    // Cho phép đọc công khai để Trang chủ hiển thị giới thiệu KTX
+    // ==========================================
+    match /buildings/{buildingId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+
+      match /members/{studentId} {
+        allow read: if isManagerOrAdmin() || (isSignedIn() && request.auth.uid == studentId);
+        allow create, update, delete: if isManagerOrAdmin();
+      }
+    }
+
+    // Lịch sử cư trú của sinh viên
+    match /studentRoomHistory/{historyId} {
+      allow read: if isManagerOrAdmin() || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 4. ĐƠN ĐĂNG KÝ VÀO KTX (DORM REGISTRATIONS)
+    // - Nộp đơn: Khách vãng lai/thí sinh chưa đăng nhập được gửi đơn
+    // - Tra cứu: Tra cứu tiến độ xét duyệt trực tuyến trên Trang chủ
+    // - Xét duyệt: Chỉ Manager, Trưởng phòng, Super Admin
+    // ==========================================
+    match /dormRegistrations/{registrationId} {
+      allow create: if true;
+      allow read: if true;
+      allow update, delete: if isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 5. YÊU CẦU HỖ TRỢ, BÁO HỎNG (SUPPORT REQUESTS)
+    // ==========================================
+    match /supportRequests/{requestId} {
+      allow create: if isSignedIn();
+      allow read: if isManagerOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow update: if isManagerOrAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow delete: if isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 6. BÀI ĐĂNG VÀ BÌNH LUẬN CỘNG ĐỒNG (COMMUNITY)
+    // ==========================================
+    match /communityPosts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isManagerOrAdmin() || (isSignedIn() && resource.data.authorUid == request.auth.uid);
+    }
+
+    match /communityComments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isManagerOrAdmin() || (isSignedIn() && resource.data.authorUid == request.auth.uid);
+    }
+
+    // ==========================================
+    // 7. ĐIỆN NƯỚC, HÓA ĐƠN & THANH TOÁN (FINANCES)
+    // ==========================================
+    match /utilities/{utilityId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isManagerOrAdmin() || (isSignedIn() && (
+        resource.data.get('studentUid', '') == request.auth.uid ||
+        resource.data.get('studentId', '') == request.auth.uid
+      ));
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isManagerOrAdmin() || (isSignedIn() && (
+        resource.data.get('studentUid', '') == request.auth.uid ||
+        resource.data.get('studentId', '') == request.auth.uid
+      ));
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 8. ĐƠN GIÁ, PHÍ PHÒNG, HỌC KỲ (PRICING & SEMESTER)
+    // Đọc công khai để sinh viên nắm được khung giá chính thức
+    // ==========================================
+    match /pricingRules/{pricingId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /roomRates/{rateId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /semesters/{semesterId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    // ==========================================
+    // 9. THÔNG BÁO & CÀI ĐẶT
+    // ==========================================
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isManagerOrAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update, delete: if isManagerOrAdmin();
+    }
+
+    // Audit logs
+    match /auditLogs/{logId} {
+      allow read, write: if isManagerOrAdmin();
+    }
+  }
+}
