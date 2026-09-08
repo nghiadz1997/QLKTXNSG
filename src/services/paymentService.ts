@@ -49,9 +49,10 @@ export const paymentService = {
     studentEmail?: string;
   }): Promise<Payment> {
     const nowIso = new Date().toISOString();
-    const paymentData: Omit<Payment, 'id'> = {
+    const paymentData: any = {
       invoiceId: data.invoiceId,
       studentUid: data.studentUid,
+      studentId: data.studentUid,
       roomId: data.roomId,
       amount: data.amount,
       paymentMethod: data.paymentMethod,

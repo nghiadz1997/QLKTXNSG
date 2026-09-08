@@ -98,7 +98,197 @@ export const invoiceService = {
     }
   },
 
-  // Generate invoices for all members of a room with snapshot unit prices
+  // Generate monthly utility invoices for all members of a room (Electricity & Water only)
+  async generateRoomUtilityInvoices(params: {
+    roomId: string;
+    semesterId: string;
+    year: number;
+    month: number;
+    otherFeePerStudent?: number;
+    dueDate: string;
+    createdByUid: string;
+    createdByEmail?: string;
+    role?: string;
+  }): Promise<Invoice[]> {
+    const {
+      roomId,
+      semesterId,
+      year,
+      month,
+      otherFeePerStudent = 0,
+      dueDate,
+      createdByUid,
+      createdByEmail,
+      role = 'manager',
+    } = params;
+
+    const room = await roomService.getRoomById(roomId);
+    if (!room) throw new Error(`Phòng ${roomId} không tồn tại.`);
+
+    const members = await roomService.getRoomMembers(roomId);
+    if (members.length === 0) {
+      throw new Error(`Phòng ${roomId} hiện không có sinh viên nào đang lưu trú.`);
+    }
+
+    // Fetch utilities for this room and month
+    const utility = await utilityService.getUtilityRecord(year, month, roomId);
+    if (!utility) {
+      throw new Error(`Chưa có chỉ số điện nước tháng ${month}/${year} của phòng ${roomId}. Vui lòng nhập chỉ số trước.`);
+    }
+
+    const occupantCount = members.length;
+    const studentElecUsage = Math.round((utility.electricity.usage / occupantCount) * 10) / 10;
+    const studentElecUnitPrice = utility.electricity.unitPrice;
+    const studentElecFee = Math.round(utility.electricity.amount / occupantCount);
+
+    const studentWaterUsage = Math.round((utility.water.usage / occupantCount) * 10) / 10;
+    const studentWaterUnitPrice = utility.water.unitPrice;
+    const studentWaterFee = Math.round(utility.water.amount / occupantCount);
+
+    const nowIso = new Date().toISOString();
+    const createdInvoices: Invoice[] = [];
+
+    for (const member of members) {
+      const invoiceId = `INV-UTIL-${year}${String(month).padStart(2, '0')}-${roomId}-${member.hssv}`;
+      const totalAmount = studentElecFee + studentWaterFee + otherFeePerStudent;
+
+      const invoice: Invoice = {
+        id: invoiceId,
+        invoiceType: 'monthly_utility',
+        title: `Hóa đơn Điện & Nước Tháng ${month}/${year}`,
+        studentUid: member.studentId,
+        studentId: member.studentId,
+        studentName: member.fullName,
+        hssv: member.hssv,
+        roomId,
+        buildingId: room.buildingId,
+        semesterId,
+        year,
+        month,
+        roomFee: 0,
+        electricityUsage: studentElecUsage,
+        electricityUnitPrice: studentElecUnitPrice,
+        electricityFee: studentElecFee,
+        waterUsage: studentWaterUsage,
+        waterUnitPrice: studentWaterUnitPrice,
+        waterFee: studentWaterFee,
+        otherFee: otherFeePerStudent,
+        totalAmount,
+        dueDate,
+        status: 'unpaid',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const docRef = doc(db, INVOICES_COLLECTION, invoiceId);
+      await setDoc(docRef, invoice);
+      createdInvoices.push(invoice);
+
+      await auditService.logAction(
+        'Tạo hóa đơn điện nước tháng',
+        createdByUid,
+        createdByEmail,
+        role,
+        INVOICES_COLLECTION,
+        invoiceId,
+        null,
+        invoice,
+        `Tạo hóa đơn điện nước tháng ${month}/${year} cho SV ${member.fullName}`
+      );
+    }
+
+    return createdInvoices;
+  },
+
+  // Generate semester room fee invoices (fixed per semester)
+  async generateSemesterRoomInvoices(params: {
+    roomId: string;
+    semesterId: string;
+    semesterName?: string;
+    year: number;
+    roomFeePerStudent: number;
+    dueDate: string;
+    createdByUid: string;
+    createdByEmail?: string;
+    role?: string;
+  }): Promise<Invoice[]> {
+    const {
+      roomId,
+      semesterId,
+      semesterName = 'Học kỳ KTX',
+      year,
+      roomFeePerStudent,
+      dueDate,
+      createdByUid,
+      createdByEmail,
+      role = 'manager',
+    } = params;
+
+    const room = await roomService.getRoomById(roomId);
+    if (!room) throw new Error(`Phòng ${roomId} không tồn tại.`);
+
+    const members = await roomService.getRoomMembers(roomId);
+    if (members.length === 0) {
+      throw new Error(`Phòng ${roomId} hiện không có sinh viên nào đang lưu trú.`);
+    }
+
+    const cleanSem = semesterId.replace(/[^a-zA-Z0-9]/g, '');
+    const nowIso = new Date().toISOString();
+    const createdInvoices: Invoice[] = [];
+
+    for (const member of members) {
+      const invoiceId = `INV-ROOM-${cleanSem}-${roomId}-${member.hssv}`;
+      const totalAmount = roomFeePerStudent;
+
+      const invoice: Invoice = {
+        id: invoiceId,
+        invoiceType: 'semester_room',
+        title: `Hóa đơn Tiền phòng ${semesterName}`,
+        studentUid: member.studentId,
+        studentId: member.studentId,
+        studentName: member.fullName,
+        hssv: member.hssv,
+        roomId,
+        buildingId: room.buildingId,
+        semesterId,
+        year,
+        month: 0,
+        roomFee: roomFeePerStudent,
+        electricityUsage: 0,
+        electricityUnitPrice: 0,
+        electricityFee: 0,
+        waterUsage: 0,
+        waterUnitPrice: 0,
+        waterFee: 0,
+        otherFee: 0,
+        totalAmount,
+        dueDate,
+        status: 'unpaid',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const docRef = doc(db, INVOICES_COLLECTION, invoiceId);
+      await setDoc(docRef, invoice);
+      createdInvoices.push(invoice);
+
+      await auditService.logAction(
+        'Tạo hóa đơn tiền phòng học kỳ',
+        createdByUid,
+        createdByEmail,
+        role,
+        INVOICES_COLLECTION,
+        invoiceId,
+        null,
+        invoice,
+        `Tạo hóa đơn tiền phòng ${semesterName} cho SV ${member.fullName}`
+      );
+    }
+
+    return createdInvoices;
+  },
+
+  // Legacy/Combined: Generate combined invoices for a room
   async generateRoomInvoices(params: {
     roomId: string;
     semesterId: string;
@@ -157,7 +347,10 @@ export const invoiceService = {
 
       const invoice: Invoice = {
         id: invoiceId,
+        invoiceType: 'combined',
+        title: `Hóa đơn KTX Tháng ${month}/${year}`,
         studentUid: member.studentId,
+        studentId: member.studentId,
         studentName: member.fullName,
         hssv: member.hssv,
         roomId,

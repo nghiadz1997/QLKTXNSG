@@ -218,11 +218,15 @@ export interface UtilityRecord {
 }
 
 // Invoices & Payments
+export type InvoiceType = 'semester_room' | 'monthly_utility' | 'combined';
 export type InvoiceStatus = 'unpaid' | 'pending' | 'paid' | 'overdue';
 
 export interface Invoice {
   id: string;
+  invoiceType?: InvoiceType;
+  title?: string;
   studentUid: string;
+  studentId?: string;
   studentName?: string;
   hssv?: string;
   roomId: string;
