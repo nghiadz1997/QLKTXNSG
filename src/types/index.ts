@@ -255,10 +255,13 @@ export interface Payment {
   id: string;
   invoiceId: string;
   studentUid: string;
+  studentId?: string;
   roomId: string;
   amount: number;
   paymentMethod: 'banking' | 'cash' | 'momo' | 'vnpay';
-  transactionCode: string;
+  transactionCode?: string;
+  billImage?: string;
+  note?: string;
   status: 'pending' | 'confirmed' | 'rejected';
   paidAt: string;
   confirmedBy?: string;

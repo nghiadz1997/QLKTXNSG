@@ -7,13 +7,17 @@ import {
   Search,
   Filter,
   ShieldCheck,
-  Calendar
+  Calendar,
+  Eye,
+  Image as ImageIcon,
+  Building
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { paymentService } from '../../services/paymentService';
 import { Card } from '../../components/common/Card';
 import { EmptyState } from '../../components/common/EmptyState';
 import { TableSkeleton } from '../../components/common/ConfirmDialog';
+import { Modal } from '../../components/common/Modal';
 import { toast } from 'sonner';
 import type { Payment } from '../../types';
 
@@ -22,6 +26,9 @@ export const PaymentApprovalPage: React.FC = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [loading, setLoading] = useState(true);
+
+  // Modal preview bill image
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const loadPayments = async () => {
     setLoading(true);
@@ -57,7 +64,7 @@ export const PaymentApprovalPage: React.FC = () => {
   };
 
   const handleReject = async (p: Payment) => {
-    const reason = prompt('Nhập lý do từ chối (ví dụ: Không tìm thấy giao dịch sao kê):');
+    const reason = prompt('Nhập lý do từ chối (ví dụ: Ảnh bill không khớp số tiền, không tìm thấy sao kê...):');
     if (!reason) return;
     try {
       await paymentService.rejectPayment(
@@ -89,39 +96,54 @@ export const PaymentApprovalPage: React.FC = () => {
     <div className="space-y-6">
       <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200/80">
         <span className="text-xs font-bold uppercase tracking-wider text-campus-600">
-          Kế Toán KTX & Đối Soát Ngân Hàng
+          Kế Toán KTX & Đối Soát Thanh Toán
         </span>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-          Duyệt & Xác Nhận Thanh Toán KTX
+          Duyệt & Xác Nhận Tiền KTX
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          Sinh viên không có quyền tự ý chuyển hóa đơn sang Đã đóng. Chỉ Quản lý KTX mới có thẩm quyền xác nhận thanh toán sau khi đối soát sao kê.
+          Kiểm tra ảnh chụp màn hình bill chuyển khoản hoặc phiếu thu tiền mặt do sinh viên gửi lên, sau đó bấm Xác nhận để gạch nợ.
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-sm flex gap-2 text-xs font-bold">
-        {[
-          { key: 'pending', label: 'Chờ đối soát' },
-          { key: 'confirmed', label: 'Đã xác nhận gạch nợ' },
-          { key: 'rejected', label: 'Giao dịch bị từ chối' },
-          { key: '', label: 'Tất cả' },
-        ].map(tab => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setStatusFilter(tab.key)}
-            className={`px-3 py-1.5 rounded-xl transition ${
-              statusFilter === tab.key
-                ? 'bg-campus-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Filter tabs */}
+      <div className="flex items-center space-x-2 bg-white p-1.5 rounded-2xl border border-slate-200/80 w-fit text-xs font-bold">
+        <button
+          type="button"
+          onClick={() => setStatusFilter('pending')}
+          className={`px-4 py-2 rounded-xl transition ${
+            statusFilter === 'pending'
+              ? 'bg-amber-500 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          Chờ đối soát ({payments.filter(p => p.status === 'pending').length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('confirmed')}
+          className={`px-4 py-2 rounded-xl transition ${
+            statusFilter === 'confirmed'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          Đã xác nhận
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('')}
+          className={`px-4 py-2 rounded-xl transition ${
+            statusFilter === ''
+              ? 'bg-slate-800 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          Tất cả
+        </button>
       </div>
 
+      {/* Table */}
       {loading ? (
         <TableSkeleton rows={4} />
       ) : payments.length === 0 ? (
@@ -131,17 +153,18 @@ export const PaymentApprovalPage: React.FC = () => {
           description="Hiện tại không có giao dịch nào cần xử lý."
         />
       ) : (
-        <Card title={`Danh Sách Giao Dịch (${payments.length})`} subtitle="Kiểm tra mã tham chiếu ngân hàng trước khi bấm Duyệt">
+        <Card title={`Danh Sách Giao Dịch (${payments.length})`} subtitle="Bấm vào ảnh bill để phóng to đối soát">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-200/80">
                 <tr>
                   <th className="py-3 px-4">Thời Gian</th>
                   <th className="py-3 px-4">Mã Hóa Đơn</th>
-                  <th className="py-3 px-4">Phòng KTX</th>
-                  <th className="py-3 px-4 font-extrabold text-slate-900">Số Tiền Nộp</th>
-                  <th className="py-3 px-4">Phương Thức</th>
-                  <th className="py-3 px-4 font-mono font-bold text-campus-700">Mã Giao Dịch Ngân Hàng</th>
+                  <th className="py-3 px-4">Phòng</th>
+                  <th className="py-3 px-4 font-extrabold text-slate-900">Số Tiền</th>
+                  <th className="py-3 px-4">Hình Thức</th>
+                  <th className="py-3 px-4">Ảnh Bill / Screenshot</th>
+                  <th className="py-3 px-4">Ghi Chú</th>
                   <th className="py-3 px-4">Trạng Thái</th>
                   <th className="py-3 px-4 text-right">Thao Tác</th>
                 </tr>
@@ -157,11 +180,37 @@ export const PaymentApprovalPage: React.FC = () => {
                     <td className="py-3 px-4 font-mono font-extrabold text-slate-900 text-sm">
                       {p.amount.toLocaleString('vi-VN')} đ
                     </td>
-                    <td className="py-3 px-4 uppercase font-semibold text-slate-500">
-                      {p.paymentMethod}
+                    <td className="py-3 px-4">
+                      {p.paymentMethod === 'cash' ? (
+                        <span className="inline-flex items-center gap-1 font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                          <Building className="w-3 h-3" /> Tại văn phòng
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-bold text-campus-700 bg-campus-50 px-2 py-0.5 rounded">
+                          <CreditCard className="w-3 h-3" /> Chuyển khoản
+                        </span>
+                      )}
                     </td>
-                    <td className="py-3 px-4 font-mono font-bold text-campus-700 bg-campus-50/50 rounded-lg">
-                      {p.transactionCode}
+                    <td className="py-3 px-4">
+                      {p.billImage ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage(p.billImage || null)}
+                          className="flex items-center space-x-1.5 text-campus-700 hover:text-campus-900 font-bold group"
+                        >
+                          <img
+                            src={p.billImage}
+                            alt="Bill"
+                            className="w-8 h-8 rounded-lg object-cover border border-slate-200 group-hover:scale-105 transition"
+                          />
+                          <span className="text-[11px] underline">Xem ảnh bill</span>
+                        </button>
+                      ) : (
+                        <span className="text-slate-400 italic">Không đính kèm ảnh</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
+                      {p.note || p.transactionCode || '—'}
                     </td>
                     <td className="py-3 px-4">{getStatusBadge(p.status)}</td>
                     <td className="py-3 px-4 text-right">
@@ -173,7 +222,7 @@ export const PaymentApprovalPage: React.FC = () => {
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center gap-1 shadow-xs"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Xác Nhận Đã Nhận</span>
+                            <span>Duyệt Tiền</span>
                           </button>
                           <button
                             type="button"
@@ -186,7 +235,7 @@ export const PaymentApprovalPage: React.FC = () => {
                         </div>
                       )}
                       {p.status === 'confirmed' && (
-                        <span className="text-emerald-600 font-bold text-[11px]">✓ Đã đối soát</span>
+                        <span className="text-emerald-600 font-bold text-[11px]">✓ Đã gạch nợ</span>
                       )}
                     </td>
                   </tr>
@@ -195,6 +244,35 @@ export const PaymentApprovalPage: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* Modal Preview Bill Image */}
+      {previewImage && (
+        <Modal
+          isOpen={!!previewImage}
+          onClose={() => setPreviewImage(null)}
+          title="Ảnh Chụp Màn Hình Bill / Biên Lai Thanh Toán"
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-center">
+            <div className="max-h-[70vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center p-2">
+              <img
+                src={previewImage}
+                alt="Chi tiết bill"
+                className="max-w-full max-h-[65vh] object-contain rounded-xl shadow-sm"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

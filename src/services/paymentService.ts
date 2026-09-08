@@ -38,14 +38,16 @@ export const paymentService = {
     }
   },
 
-  // Student submits proof of payment (banking/momo/etc.)
+  // Student submits proof of payment (banking/cash/momo/etc.)
   async submitPayment(data: {
     invoiceId: string;
     studentUid: string;
     roomId: string;
     amount: number;
     paymentMethod: 'banking' | 'cash' | 'momo' | 'vnpay';
-    transactionCode: string;
+    transactionCode?: string;
+    billImage?: string;
+    note?: string;
     studentEmail?: string;
   }): Promise<Payment> {
     const nowIso = new Date().toISOString();
@@ -56,7 +58,13 @@ export const paymentService = {
       roomId: data.roomId,
       amount: data.amount,
       paymentMethod: data.paymentMethod,
-      transactionCode: data.transactionCode,
+      transactionCode:
+        data.transactionCode ||
+        (data.paymentMethod === 'cash'
+          ? 'Đã nộp tại văn phòng KTX'
+          : 'Chuyển khoản (có ảnh bill đính kèm)'),
+      billImage: data.billImage || '',
+      note: data.note || '',
       status: 'pending',
       paidAt: nowIso,
       createdAt: nowIso,
