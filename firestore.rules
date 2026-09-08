@@ -88,14 +88,14 @@ service cloud.firestore {
       allow create, update, delete: if isManagerOrAdmin();
 
       match /members/{studentId} {
-        allow read: if isManagerOrAdmin() || (isSignedIn() && request.auth.uid == studentId);
+        allow read: if isSignedIn();
         allow create, update, delete: if isManagerOrAdmin();
       }
     }
 
     // Lịch sử cư trú của sinh viên
     match /studentRoomHistory/{historyId} {
-      allow read: if isManagerOrAdmin() || (isStudent() && resource.data.studentUid == request.auth.uid);
+      allow read: if isSignedIn();
       allow create, update, delete: if isManagerOrAdmin();
     }
 
