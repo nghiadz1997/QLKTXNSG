@@ -1,9 +1,54 @@
-import React from 'react';
-import { Settings, ShieldCheck, Database, KeyRound, CheckCircle2, Lock, Radio } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  Settings,
+  ShieldCheck,
+  Database,
+  Lock,
+  Radio,
+  CreditCard,
+  Save,
+  CheckCircle2
+} from 'lucide-react';
 import { isRealFirebaseConfigured } from '../../config/firebase';
 import { Card } from '../../components/common/Card';
+import { settingsService, DEFAULT_BANK_INFO, type DormBankInfo } from '../../services/settingsService';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 
 export const SystemSettingsPage: React.FC = () => {
+  const { userProfile, role } = useAuth();
+  const [bankInfo, setBankInfo] = useState<DormBankInfo>(DEFAULT_BANK_INFO);
+  const [savingBank, setSavingBank] = useState(false);
+  const [loadingBank, setLoadingBank] = useState(true);
+
+  useEffect(() => {
+    settingsService
+      .getBankInfo()
+      .then(info => {
+        setBankInfo(info);
+      })
+      .finally(() => setLoadingBank(false));
+  }, []);
+
+  const handleSaveBankInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingBank(true);
+    try {
+      await settingsService.saveBankInfo(
+        bankInfo,
+        userProfile?.uid || 'admin',
+        userProfile?.email,
+        role || 'superAdmin'
+      );
+      toast.success('Đã lưu cấu hình tài khoản ngân hàng KTX thành công! Sinh viên sẽ thấy thông tin này ngay lập tức.');
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Lỗi khi lưu thông tin ngân hàng: ' + (err.message || 'Thử lại sau.'));
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200/80">
@@ -14,11 +59,109 @@ export const SystemSettingsPage: React.FC = () => {
           Cài Đặt Hệ Thống KÝ TÚC XÁ NAM SÀI GÒN
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          Giám sát trạng thái kết nối cơ sở dữ liệu Firebase Cloud Firestore (Project qlktxnsg), xác thực Authentication và cơ chế đồng bộ thời gian thực.
+          Giám sát trạng thái kết nối cơ sở dữ liệu Firebase Cloud Firestore (Project qlktxnsg), cấu hình tài khoản nhận tiền KTX và phân quyền thời gian thực.
         </p>
       </div>
 
       <div className="space-y-6">
+        {/* Dormitory Bank Account Settings */}
+        <Card
+          title="Thông Tin Tài Khoản Nhận Tiền KTX Nam Sài Gòn"
+          subtitle="Thông tin hiển thị khi sinh viên nộp tiền phòng học kỳ & điện nước"
+        >
+          <form onSubmit={handleSaveBankInfo} className="space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Tên Ngân Hàng Thụ Hưởng *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: Agribank / Vietcombank / BIDV"
+                  value={bankInfo.bankName}
+                  onChange={e => setBankInfo({ ...bankInfo, bankName: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-campus-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Số Tài Khoản KTX *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: 1600205268888 hoặc STK chính thức"
+                  value={bankInfo.accountNumber}
+                  onChange={e => setBankInfo({ ...bankInfo, accountNumber: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-campus-700 focus:outline-none focus:ring-2 focus:ring-campus-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Tên Chủ Tài Khoản *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: BAN QUẢN LÝ KÝ TÚC XÁ NAM SÀI GÒN"
+                  value={bankInfo.accountHolder}
+                  onChange={e => setBankInfo({ ...bankInfo, accountHolder: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold uppercase focus:outline-none focus:ring-2 focus:ring-campus-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Chi Nhánh Ngân Hàng
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Chi nhánh Nam Sài Gòn, TP. Hồ Chí Minh"
+                  value={bankInfo.branch || ''}
+                  onChange={e => setBankInfo({ ...bankInfo, branch: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-campus-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Ghi Chú Hướng Dẫn Sinh Viên
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Ghi chú thêm về quy định nộp tiền hoặc lưu ý cho sinh viên..."
+                value={bankInfo.note || ''}
+                onChange={e => setBankInfo({ ...bankInfo, note: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-campus-500"
+              />
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={savingBank}
+                className="px-5 py-2.5 bg-campus-600 hover:bg-campus-700 text-white font-bold rounded-xl text-xs shadow-md shadow-campus-600/30 transition flex items-center space-x-2"
+              >
+                {savingBank ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Đang lưu...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Lưu Cấu Hình Tài Khoản KTX</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </Card>
+
         {/* Firebase Status */}
         <Card title="Trạng Thái Kết Nối Firebase" subtitle="Thông tin cấu hình backend">
           <div className="space-y-4">
@@ -34,11 +177,13 @@ export const SystemSettingsPage: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                isRealFirebaseConfigured
-                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                  : 'bg-blue-100 text-blue-800 border-blue-200'
-              }`}>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  isRealFirebaseConfigured
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                    : 'bg-blue-100 text-blue-800 border-blue-200'
+                }`}
+              >
                 {isRealFirebaseConfigured ? '🟢 Live Production (qlktxnsg)' : '🔵 Dev / Demo Mode'}
               </span>
             </div>
@@ -85,7 +230,7 @@ export const SystemSettingsPage: React.FC = () => {
               <div>
                 <h4 className="font-bold text-sm text-purple-950">Phân Quyền Đa Cấp (Role-Based Access Control)</h4>
                 <p className="text-xs text-purple-800 mt-1 leading-relaxed">
-                  Hệ thống phân quyền theo cấp bậc: <strong>Super Admin</strong> (toàn quyền thiết lập hệ thống, tài khoản, đơn giá), <strong>Trưởng Phòng / Quản Lý KTX</strong> (vận hành phòng, sinh viên, điện nước, hóa đơn) và <strong>Sinh Viên</strong> (tra cứu phòng ở, hóa đơn cá nhân, báo cáo sự cố).
+                  Hệ thống phân quyền theo cấp bậc: <strong>Super Admin</strong> (toàn quyền thiết lập hệ thống, tài khoản, đơn giá, số tài khoản ngân hàng KTX), <strong>Trưởng Phòng / Quản Lý KTX</strong> (vận hành phòng, sinh viên, điện nước, hóa đơn) và <strong>Sinh Viên</strong> (tra cứu phòng ở, hóa đơn cá nhân, xác nhận đã đóng tiền).
                 </p>
               </div>
             </div>

@@ -65,13 +65,17 @@ export const paymentService = {
     const docRef = await addDoc(collection(db, PAYMENTS_COLLECTION), paymentData);
 
     // Also update invoice status to 'pending' to show payment in review
-    await invoiceService.updateInvoiceStatus(
-      data.invoiceId,
-      'pending',
-      data.studentUid,
-      data.studentEmail,
-      'student'
-    );
+    try {
+      await invoiceService.updateInvoiceStatus(
+        data.invoiceId,
+        'pending',
+        data.studentUid,
+        data.studentEmail,
+        'student'
+      );
+    } catch (invErr) {
+      console.warn('Could not update invoice status directly (payment ticket created):', invErr);
+    }
 
     return { id: docRef.id, ...paymentData };
   },

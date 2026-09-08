@@ -13,15 +13,17 @@ import {
   Send,
   HelpCircle,
   ShieldCheck,
-  Check
+  Check,
+  Copy
 } from 'lucide-react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { EmptyState } from '../../components/common/EmptyState';
 import { TableSkeleton } from '../../components/common/ConfirmDialog';
 import { Modal } from '../../components/common/Modal';
 import { paymentService } from '../../services/paymentService';
+import { settingsService, DEFAULT_BANK_INFO, type DormBankInfo } from '../../services/settingsService';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceStatus } from '../../types';
 
@@ -29,20 +31,38 @@ export const StudentInvoicesPage: React.FC = () => {
   const { studentData, userProfile } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bankInfo, setBankInfo] = useState<DormBankInfo>(DEFAULT_BANK_INFO);
 
   // Modal payment confirmation
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'banking' | 'cash' | 'momo'>('banking');
+  const [senderBank, setSenderBank] = useState('Vietcombank');
   const [transactionCode, setTransactionCode] = useState('');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const studentUid = studentData?.uid || userProfile?.uid || '';
   const authUid = userProfile?.uid || '';
+  const studentDocId = studentData?.uid || '';
+
+  // Real-time Bank Info listener from settings/bankInfo
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, 'settings', 'bankInfo'),
+      docSnap => {
+        if (docSnap.exists()) {
+          setBankInfo({ ...DEFAULT_BANK_INFO, ...docSnap.data() } as DormBankInfo);
+        }
+      },
+      err => {
+        console.warn('Bank info snapshot error:', err);
+      }
+    );
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
-    if (!studentUid && !authUid) {
+    if (!authUid && !studentDocId) {
       setInvoices([]);
       setLoading(false);
       return;
@@ -51,8 +71,8 @@ export const StudentInvoicesPage: React.FC = () => {
     setLoading(true);
     const invoiceMap = new Map<string, Invoice>();
 
-    // Listen by studentUid or studentId
-    const targetUids = Array.from(new Set([studentUid, authUid].filter(Boolean)));
+    // Listen by authUid or studentDocId
+    const targetUids = Array.from(new Set([authUid, studentDocId].filter(Boolean)));
     const unsubs: (() => void)[] = [];
 
     targetUids.forEach(uid => {
@@ -86,7 +106,6 @@ export const StudentInvoicesPage: React.FC = () => {
       setLoading(false);
     };
 
-    // Safety timeout in case no documents returned
     const timeoutId = setTimeout(() => {
       setLoading(false);
     }, 1500);
@@ -95,41 +114,65 @@ export const StudentInvoicesPage: React.FC = () => {
       clearTimeout(timeoutId);
       unsubs.forEach(u => u());
     };
-  }, [studentUid, authUid]);
+  }, [authUid, studentDocId]);
 
   const openConfirmPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setPaymentMethod('banking');
+    setSenderBank('Vietcombank');
     setTransactionCode('');
     setNote('');
     setPaymentModalOpen(true);
+  };
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`Đã sao chép ${label}: ${text}`);
   };
 
   const handleSubmitPaymentProof = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
     if (!transactionCode.trim()) {
-      toast.error('Vui lòng nhập mã giao dịch hoặc thông tin biên lai.');
+      toast.error('Vui lòng nhập mã giao dịch hoặc thông tin nộp tiền.');
       return;
     }
 
     setSubmitting(true);
+    const finalCode =
+      paymentMethod === 'banking'
+        ? `[${senderBank}] ${transactionCode.trim()}`
+        : transactionCode.trim();
+
     try {
       await paymentService.submitPayment({
         invoiceId: selectedInvoice.id,
-        studentUid: studentUid || authUid,
+        studentUid: authUid || studentDocId,
         roomId: selectedInvoice.roomId,
         amount: selectedInvoice.totalAmount,
         paymentMethod: paymentMethod,
-        transactionCode: transactionCode.trim() + (note ? ` (${note.trim()})` : ''),
+        transactionCode: finalCode + (note ? ` - ${note.trim()}` : ''),
         studentEmail: userProfile?.email,
       });
 
-      toast.success('Đã gửi thông báo xác nhận đã đóng tiền! KTX sẽ đối soát và duyệt cho bạn.');
+      // Optimistically update invoice status locally
+      setInvoices(prev =>
+        prev.map(inv =>
+          inv.id === selectedInvoice.id ? { ...inv, status: 'pending' as InvoiceStatus } : inv
+        )
+      );
+
+      toast.success('Đã gửi thông báo xác nhận đã đóng tiền! Ban Quản lý sẽ đối soát và gạch nợ cho bạn.');
       setPaymentModalOpen(false);
     } catch (err: any) {
       console.error(err);
-      toast.error('Lỗi khi gửi thông báo: ' + (err.message || 'Vui lòng thử lại sau.'));
+      if (err.message?.includes('Missing or insufficient permissions') || err.code === 'permission-denied') {
+        toast.error(
+          'Lỗi quyền hạn (Missing or insufficient permissions). Bạn cần xuất bản (Publish) file firestore.rules lên Firebase Console.'
+        );
+      } else {
+        toast.error('Lỗi khi gửi thông báo: ' + (err.message || 'Vui lòng thử lại sau.'));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -196,7 +239,7 @@ export const StudentInvoicesPage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <span className="text-xs font-bold uppercase tracking-wider text-campus-600">
-              Ký Túc Xá • {studentData?.roomId ? `Phòng ${studentData.roomId}` : 'Chưa phân phòng'}
+              Ký Túc Xá Nam Sài Gòn • {studentData?.roomId ? `Phòng ${studentData.roomId}` : 'Chưa phân phòng'}
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
               Tra Cứu & Xác Nhận Đóng Tiền KTX
@@ -433,30 +476,65 @@ export const StudentInvoicesPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Dormitory Account Details */}
-            <div className="p-3.5 bg-campus-50/70 rounded-2xl border border-campus-200 text-campus-900 space-y-1.5">
+            {/* Dormitory Account Details from Settings */}
+            <div className="p-3.5 bg-campus-50/70 rounded-2xl border border-campus-200 text-campus-900 space-y-2">
               <div className="flex items-center space-x-1.5 font-bold text-campus-950">
                 <ShieldCheck className="w-4 h-4 text-campus-600" />
-                <span>Thông tin chuyển khoản KTX Trường Cao Thắng / NSG:</span>
+                <span>Thông tin chuyển khoản KÝ TÚC XÁ NAM SÀI GÒN:</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
                 <div>
                   <span className="text-slate-500 block">Ngân hàng thụ hưởng:</span>
-                  <span className="font-bold text-slate-800">Agribank / Vietcombank</span>
+                  <span className="font-bold text-slate-800">{bankInfo.bankName}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Số tài khoản KTX:</span>
-                  <span className="font-bold text-campus-700 font-mono text-xs">1600205268888</span>
+                  <div className="flex items-center space-x-1">
+                    <span className="font-bold text-campus-700 font-mono text-xs">
+                      {bankInfo.accountNumber}
+                    </span>
+                    {bankInfo.accountNumber && bankInfo.accountNumber !== 'Liên hệ Văn phòng KTX' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(bankInfo.accountNumber, 'Số tài khoản')}
+                        className="text-slate-400 hover:text-campus-600"
+                        title="Sao chép STK"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="sm:col-span-2">
                   <span className="text-slate-500 block">Chủ tài khoản:</span>
-                  <span className="font-bold text-slate-800 uppercase">KÝ TÚC XÁ CAO ĐẲNG KỸ THUẬT CAO THẮNG</span>
+                  <span className="font-bold text-slate-800 uppercase">{bankInfo.accountHolder}</span>
                 </div>
-                <div className="sm:col-span-2 bg-white/70 p-2 rounded-xl border border-campus-200/60">
-                  <span className="text-slate-500 block text-[10px]">Cú pháp chuyển khoản khuyến nghị:</span>
-                  <span className="font-mono font-bold text-campus-800">
-                    {studentData?.hssv || 'MSSV'} {selectedInvoice.id}
-                  </span>
+                {bankInfo.branch && (
+                  <div className="sm:col-span-2 text-slate-500 text-[10px]">
+                    Chi nhánh: <span className="font-medium text-slate-700">{bankInfo.branch}</span>
+                  </div>
+                )}
+                <div className="sm:col-span-2 bg-white/80 p-2.5 rounded-xl border border-campus-200/80">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Cú pháp nội dung chuyển khoản chuẩn:</span>
+                      <span className="font-mono font-bold text-campus-800 text-xs">
+                        {studentData?.hssv || 'MSSV'} {selectedInvoice.id}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyText(
+                          `${studentData?.hssv || 'MSSV'} ${selectedInvoice.id}`,
+                          'Cú pháp chuyển khoản'
+                        )
+                      }
+                      className="px-2 py-1 bg-campus-100 hover:bg-campus-200 text-campus-700 rounded text-[10px] font-bold flex items-center space-x-1"
+                    >
+                      <Copy className="w-3 h-3 mr-1" /> Sao chép
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -503,6 +581,32 @@ export const StudentInvoicesPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Banking: Sender Bank Name */}
+            {paymentMethod === 'banking' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  Ngân Hàng Bạn Dùng Để Chuyển Khoản *
+                </label>
+                <select
+                  value={senderBank}
+                  onChange={e => setSenderBank(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-campus-500"
+                >
+                  <option value="Vietcombank">Vietcombank</option>
+                  <option value="Agribank">Agribank</option>
+                  <option value="BIDV">BIDV</option>
+                  <option value="VietinBank">VietinBank</option>
+                  <option value="MBBank">MBBank (Ngân hàng Quân Đội)</option>
+                  <option value="Techcombank">Techcombank</option>
+                  <option value="ACB">ACB</option>
+                  <option value="TPBank">TPBank</option>
+                  <option value="VPBank">VPBank</option>
+                  <option value="Sacombank">Sacombank</option>
+                  <option value="Ngân hàng khác">Ngân hàng khác</option>
+                </select>
+              </div>
+            )}
+
             {/* Transaction Reference / Code */}
             <div>
               <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
@@ -513,7 +617,7 @@ export const StudentInvoicesPage: React.FC = () => {
                 required
                 placeholder={
                   paymentMethod === 'cash'
-                    ? 'Ví dụ: Đã nộp tiền mặt tại VP KTX cho thầy/cô...'
+                    ? 'Ví dụ: Đã nộp tiền mặt tại VP KTX Nam Sài Gòn cho cán bộ quản lý...'
                     : 'Ví dụ: FT2609088899 hoặc mã giao dịch trên app ngân hàng'
                 }
                 value={transactionCode}
@@ -529,7 +633,7 @@ export const StudentInvoicesPage: React.FC = () => {
               </label>
               <textarea
                 rows={2}
-                placeholder="Ghi chú thêm số tài khoản người gửi hoặc thời gian chuyển tiền..."
+                placeholder="Ghi chú thêm tên người gửi, số tài khoản hoặc ngày giờ thực hiện giao dịch..."
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-campus-500"
